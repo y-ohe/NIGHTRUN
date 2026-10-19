@@ -47,3 +47,27 @@ fn question_mark_is_not_a_fallback() {
     assert!(emoji.is_none());
     assert_ne!(Some(q), emoji);
 }
+
+#[test]
+fn japanese_psf_fonts_cover_common_jis_characters() {
+    let fonts = Fonts::load();
+    let (Some(small), Some(body), Some(head)) = (
+        fonts.japanese_small(),
+        fonts.japanese_body(),
+        fonts.japanese_head(),
+    ) else {
+        return;
+    };
+
+    for (name, font, size) in [("small", small, 16), ("body", body, 24), ("head", head, 32)] {
+        assert_eq!((font.width, font.height), (size, size));
+        for ch in "日本語かなカナ漢字、。ー".chars() {
+            assert!(font.glyph(ch).is_some(), "{name}: missing {ch:?}");
+        }
+    }
+
+    assert_eq!(
+        nr_gfx::draw::text_width_with_fallback(&fonts.body, Some(body), "A日A", 1, 0),
+        48
+    );
+}

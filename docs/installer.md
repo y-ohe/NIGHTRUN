@@ -23,8 +23,27 @@ Linux-specific); build images manually per README.md instead.
 
 Layout: `install.sh` (launcher) + `scripts/installer/lib/*.sh` (one
 module per concern: ui, preflight, targets, models, downloads, build,
-media, flash, verify, safety) + `config/models.manifest` +
+fonts, media, flash, verify, safety) + `config/models.manifest` +
 `scripts/installer/tests/`.
+
+## Japanese fonts
+
+Before building the image, the installer offers an optional Noto Sans JP
+download. The source is pinned to commit
+`66a36c8c94b1a5d992ee4e7f392fccfe4945767c` in `google/fonts`; both the
+variable TTF and OFL license are checked against pinned SHA-256 digests.
+`scripts/installer/prepare-fonts.sh` calls `fonts.py` to rasterize the JIS
+X 0208 repertoire into 16x16, 24x24 and 32x32 PSF2 files. The resulting
+files live under ignored `build/nightrun-fonts/` and are embedded in the
+UEFI binary at compile time. Japanese glyphs fall back from the existing
+Spleen font in chat text and the input line. The OFL text is copied to the
+root of both target images as `NotoSansJP-OFL.txt`.
+
+The rasterizer needs Python 3 and Pillow built with variable-font support.
+If Pillow is missing, the installer displays the package command and asks
+before installing it. Choosing to skip leaves the existing Spleen-only
+build unchanged. To force a Spleen-only build after preparing Japanese
+fonts, set `NIGHTRUN_DISABLE_JAPANESE_FONT=1` for the Cargo build.
 
 ## Targets
 

@@ -71,6 +71,11 @@ and bitmap fonts, USB keyboard input with caret editing and scrollback, multi-co
 inference through firmware MP services, serial-port diagnostics. On the Pi 5 it also
 drives the fan through the RP1, because nothing else is around to do it.
 
+The installer can optionally fetch a SHA-256-pinned Noto Sans JP font from GitHub,
+rasterize the JIS X 0208 repertoire at 16, 24 and 32 pixels, and embed the resulting
+PSF2 fonts. Chat text falls back to these Japanese glyphs while retaining Spleen for
+the existing UI. The Noto SIL OFL license is included in the boot image.
+
 **Model lifecycle.** GGUF inspection and conversion (`nrconvert`), a purpose-built `.nrm`
 container, full RAM residency before chat starts, CRC-32 sections verified while the file
 streams from disk (there is no separate verify pass), and sealed storage afterwards.
@@ -288,3 +293,5 @@ MIT. See [LICENSE](LICENSE).
 Model weights are not included and carry their own terms: the Llama models under the
 Llama Community License, Qwen and Granite builds under Apache-2.0. The Spleen bitmap
 font is BSD-2-Clause (bundled, attribution in [assets/fonts](assets/fonts)).
+Noto Sans JP is optional, downloaded by the installer, and licensed under the SIL
+Open Font License 1.1; its license is included in images that use it.

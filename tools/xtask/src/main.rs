@@ -134,6 +134,10 @@ fn build_image(fresh: bool, model_arg: Option<&str>, arch: Arch) -> PathBuf {
     if model.is_none() {
         println!("note: model file missing - building image without model");
     }
+    let font_license = root.join("build/nightrun-fonts/OFL.txt");
+    let font_license = (std::env::var_os("NIGHTRUN_DISABLE_JAPANESE_FONT").is_none()
+        && font_license.is_file())
+    .then_some(font_license);
 
     // Sidecar records which model the image holds, so switching models
     // forces a full rebuild instead of a stale EFI-only update.
@@ -141,13 +145,27 @@ fn build_image(fresh: bool, model_arg: Option<&str>, arch: Arch) -> PathBuf {
         Arch::X86 => "target/image-model.txt",
         Arch::Aarch64 => "target/image-model-aarch64.txt",
     });
-    let stamp = model
+    let mut stamp = model
         .as_ref()
         .map(|m| {
             let sz = std::fs::metadata(m).map(|md| md.len()).unwrap_or(0);
             format!("{}|{sz}", m.display())
         })
         .unwrap_or_default();
+    if let Some(license) = font_license.as_ref() {
+        let digest = std::process::Command::new("sha256sum")
+            .arg(license)
+            .output()
+            .expect("sha256sum font license");
+        stamp.push('|');
+        stamp.push_str(
+            std::str::from_utf8(&digest.stdout)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap(),
+        );
+    }
     let same_model = std::fs::read_to_string(&sidecar)
         .map(|s| s == stamp)
         .unwrap_or(false);
@@ -156,7 +174,13 @@ fn build_image(fresh: bool, model_arg: Option<&str>, arch: Arch) -> PathBuf {
         println!("updated {} in {}", arch.boot_file(), img.display());
         return img;
     }
-    image::build(&img, &efi, model.as_deref(), arch.boot_file());
+    image::build(
+        &img,
+        &efi,
+        model.as_deref(),
+        font_license.as_deref(),
+        arch.boot_file(),
+    );
     let _ = std::fs::write(&sidecar, stamp);
     img
 }
@@ -172,11 +196,16 @@ fn pi_image(model_arg: Option<&str>) {
     if model.is_none() {
         println!("note: model file missing - building image without model");
     }
+    let font_license = root.join("build/nightrun-fonts/OFL.txt");
+    let font_license = (std::env::var_os("NIGHTRUN_DISABLE_JAPANESE_FONT").is_none()
+        && font_license.is_file())
+    .then_some(font_license);
     let firmware = root.join("vendor/rpi5-uefi");
     image::build_pi(
         &root.join("nightrun-pi5.img"),
         &efi,
         model.as_deref(),
+        font_license.as_deref(),
         &firmware,
     );
 }

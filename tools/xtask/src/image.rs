@@ -6,14 +6,23 @@ use std::path::Path;
 
 const LB: u64 = 512;
 
-pub fn build(img_path: &Path, efi: &Path, model: Option<&Path>, boot_file: &str) {
+pub fn build(
+    img_path: &Path,
+    efi: &Path,
+    model: Option<&Path>,
+    font_license: Option<&Path>,
+    boot_file: &str,
+) {
     let model_size = model
         .map(|m| std::fs::metadata(m).expect("model file").len())
         .unwrap_or(0);
     let efi_size = std::fs::metadata(efi).expect("efi binary").len();
 
     // ESP sized for contents + FAT32 overhead + slack.
-    let contents = model_size + efi_size;
+    let license_size = font_license
+        .map(|path| std::fs::metadata(path).expect("font license").len())
+        .unwrap_or(0);
+    let contents = model_size + efi_size + license_size;
     let esp_bytes = (contents + contents / 50 + 64 * 1024 * 1024).next_multiple_of(1024 * 1024);
     // GPT: MBR + primary header/table (34 lb) up front, backup (33 lb) at end.
     let disk_bytes = esp_bytes + 4 * 1024 * 1024;
@@ -75,6 +84,9 @@ pub fn build(img_path: &Path, efi: &Path, model: Option<&Path>, boot_file: &str)
         if let Some(model) = model {
             copy_into(&root, "model.nrm", model);
         }
+        if let Some(license) = font_license {
+            copy_into(&root, "NotoSansJP-OFL.txt", license);
+        }
     }
     fs.unmount().expect("unmount");
     file.flush().unwrap();
@@ -115,7 +127,13 @@ fn copy_into<IO: fatfs::ReadWriteSeek>(dir: &fatfs::Dir<'_, IO>, name: &str, src
 /// the UEFI firmware payload (RPI_EFI.fd + config.txt, built from the
 /// pinned rpi5-uefi source — see scripts/build-rpi5-firmware.sh),
 /// EFI/BOOT/BOOTAA64.EFI and model.nrm.
-pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir: &Path) {
+pub fn build_pi(
+    img_path: &Path,
+    efi: &Path,
+    model: Option<&Path>,
+    font_license: Option<&Path>,
+    firmware_dir: &Path,
+) {
     let fw_fd = firmware_dir.join("RPI_EFI.fd");
     // config.txt is repo-owned (vendor's settings + the os_check=0
     // override newer EEPROMs need for UEFI armstubs).
@@ -130,9 +148,13 @@ pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir:
     let model_size = model
         .map(|m| std::fs::metadata(m).expect("model file").len())
         .unwrap_or(0);
+    let license_size = font_license
+        .map(|path| std::fs::metadata(path).expect("font license").len())
+        .unwrap_or(0);
     let contents = model_size
         + std::fs::metadata(efi).unwrap().len()
-        + std::fs::metadata(&fw_fd).unwrap().len();
+        + std::fs::metadata(&fw_fd).unwrap().len()
+        + license_size;
     let part_bytes = (contents + contents / 50 + 64 * 1024 * 1024).next_multiple_of(1024 * 1024);
     const PART_START_LBA: u64 = 2048; // 1 MiB alignment, Pi bootloader friendly
     let disk_bytes = PART_START_LBA * LB + part_bytes;
@@ -203,6 +225,9 @@ pub fn build_pi(img_path: &Path, efi: &Path, model: Option<&Path>, firmware_dir:
         copy_into(&boot, "BOOTAA64.EFI", efi);
         if let Some(model) = model {
             copy_into(&root, "model.nrm", model);
+        }
+        if let Some(license) = font_license {
+            copy_into(&root, "NotoSansJP-OFL.txt", license);
         }
     }
     fs.unmount().expect("unmount");

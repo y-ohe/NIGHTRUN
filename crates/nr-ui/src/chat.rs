@@ -191,6 +191,7 @@ fn input_bar(
     surf.fill_rect(0, y0, w, 1, theme::BORDER);
 
     let f = &fonts.body;
+    let jp = fonts.japanese_body();
     let ty = y0 + (INPUT_H - f.height as i32) / 2;
     if generating {
         draw::text(
@@ -214,28 +215,47 @@ fn input_bar(
     // sits ON the caret cell (classic terminal), overlaying the char there.
     let chars: Vec<char> = input.chars().collect();
     let caret = caret.min(chars.len());
-    let max_cols = ((w - tx - MARGIN - f.width as i32) / f.width as i32).max(1) as usize;
-    let start = if caret >= max_cols {
-        caret + 1 - max_cols
-    } else {
-        0
-    };
-    let end = (start + max_cols).min(chars.len());
+    let available = (w - tx - MARGIN).max(f.width as i32) as usize;
+    let cursor_width = chars
+        .get(caret)
+        .map(|ch| draw::glyph_width(f, jp, *ch))
+        .unwrap_or(f.width);
+    let mut start = caret;
+    let mut left_width = 0;
+    while start > 0 {
+        let next_width = draw::glyph_width(f, jp, chars[start - 1]);
+        if left_width + next_width + cursor_width > available {
+            break;
+        }
+        left_width += next_width;
+        start -= 1;
+    }
+    let mut end = caret;
+    let mut right_width = 0;
+    while end < chars.len() {
+        let next_width = draw::glyph_width(f, jp, chars[end]);
+        if left_width + cursor_width + right_width + next_width > available {
+            break;
+        }
+        right_width += next_width;
+        end += 1;
+    }
     let shown: String = chars[start..end].iter().collect();
-    draw::text(surf, f, tx, ty, &shown, theme::TEXT_PRIMARY, 1, 0);
+    draw::text_with_fallback(surf, f, jp, tx, ty, &shown, theme::TEXT_PRIMARY, 1, 0);
     if cursor_on {
-        let cx = tx + (caret - start) as i32 * f.width as i32;
+        let prefix: String = chars[start..caret].iter().collect();
+        let cx = tx + draw::text_width_with_fallback(f, jp, &prefix, 1, 0);
         surf.fill_rect(
             cx,
             ty + 2,
-            f.width as i32 - 2,
+            cursor_width as i32 - 2,
             f.height as i32 - 4,
             theme::NEON_CYAN,
         );
         if caret < chars.len() {
             // Character under the cursor, inverted.
             let under: String = chars[caret..caret + 1].iter().collect();
-            draw::text(surf, f, cx, ty, &under, theme::BG_DEEP, 1, 0);
+            draw::text_with_fallback(surf, f, jp, cx, ty, &under, theme::BG_DEEP, 1, 0);
         }
     }
 }
@@ -252,16 +272,19 @@ fn scrollback(
     content_col: usize,
 ) -> usize {
     let f = &fonts.body;
+    let jp = fonts.japanese_body();
     let w = surf.width as i32;
     let h = surf.height as i32;
-    let cols = ((w - 2 * MARGIN) / f.width as i32).max(10) as usize;
+    let available_width = (w - 2 * MARGIN).max(f.width as i32) as usize;
     let top = STATUS_H + 10;
     let bottom = h - INPUT_H - 10;
 
     // All message text starts at one fixed content column, regardless of
     // which label (user/llama/qwen/granite/none) precedes it.
     let _ = assistant;
-    let body_cols = cols.saturating_sub(content_col).max(8);
+    let content_width = available_width
+        .saturating_sub(content_col * f.width)
+        .max(f.width);
 
     // Wrap all turns into (label_color, body_color, label, body, at_margin)
     // records; continuation lines carry an empty label. System text (the
@@ -284,11 +307,11 @@ fn scrollback(
         // System text keeps its accent color on every line; user/assistant
         // bodies render in primary.
         let (body_color, at_margin, width) = match turn.role {
-            Role::System => (turn.role.color(), true, cols),
-            _ => (theme::TEXT_PRIMARY, false, body_cols),
+            Role::System => (turn.role.color(), true, available_width),
+            _ => (theme::TEXT_PRIMARY, false, content_width),
         };
         let mut first = true;
-        for line in wrap(&turn.text, width) {
+        for line in wrap(&turn.text, width, f, jp) {
             let l = if first { label.clone() } else { String::new() };
             lines.push((turn.role.color(), body_color, l, line, at_margin));
             first = false;
@@ -316,11 +339,11 @@ fn scrollback(
     let body_x = MARGIN + content_col as i32 * f.width as i32;
     for (label_color, body_color, label, body, at_margin) in &lines[start..end] {
         if !label.is_empty() {
-            draw::text(surf, f, MARGIN, y, label, *label_color, 1, 0);
+            draw::text_with_fallback(surf, f, jp, MARGIN, y, label, *label_color, 1, 0);
         }
         if !body.is_empty() {
             let x = if *at_margin { MARGIN } else { body_x };
-            draw::text(surf, f, x, y, body, *body_color, 1, 0);
+            draw::text_with_fallback(surf, f, jp, x, y, body, *body_color, 1, 0);
         }
         y += line_h;
     }
@@ -363,27 +386,34 @@ fn scrollback(
     scroll
 }
 
-/// Word wrap to `cols` columns.
-fn wrap(text: &str, cols: usize) -> Vec<String> {
-    // Degenerate surfaces (cols == 0) must not loop forever in
-    // push_word's chunking; render nothing instead.
-    if cols == 0 {
+/// Word wrap to a pixel width.
+fn wrap(
+    text: &str,
+    max_width: usize,
+    font: &nr_gfx::PsfFont,
+    fallback: Option<&nr_gfx::PsfFont>,
+) -> Vec<String> {
+    // Degenerate surfaces must not loop forever in push_word; render nothing.
+    if max_width == 0 {
         return Vec::new();
     }
     let mut out: Vec<String> = Vec::new();
     for para in text.split('\n') {
         let mut line = String::new();
         for word in para.split(' ') {
-            let wlen = word.chars().count();
-            let llen = line.chars().count();
-            if llen == 0 {
-                push_word(&mut out, &mut line, word, cols);
-            } else if llen + 1 + wlen <= cols {
+            let line_width = draw::text_width_with_fallback(font, fallback, &line, 1, 0) as usize;
+            if line_width == 0 {
+                push_word(&mut out, &mut line, word, max_width, font, fallback);
+            } else if line_width
+                + font.width
+                + draw::text_width_with_fallback(font, fallback, word, 1, 0) as usize
+                <= max_width
+            {
                 line.push(' ');
                 line.push_str(word);
             } else {
                 out.push(core::mem::take(&mut line));
-                push_word(&mut out, &mut line, word, cols);
+                push_word(&mut out, &mut line, word, max_width, font, fallback);
             }
         }
         out.push(line);
@@ -391,14 +421,27 @@ fn wrap(text: &str, cols: usize) -> Vec<String> {
     out
 }
 
-/// Push a word onto the current line, hard-splitting if longer than `cols`.
-fn push_word(out: &mut Vec<String>, line: &mut String, word: &str, cols: usize) {
-    let mut rest: Vec<char> = word.chars().collect();
-    while rest.len() > cols {
-        let chunk: String = rest.drain(..cols).collect();
-        out.push(chunk);
+/// Push a word onto the current line, hard-splitting by rendered width.
+fn push_word(
+    out: &mut Vec<String>,
+    line: &mut String,
+    word: &str,
+    max_width: usize,
+    font: &nr_gfx::PsfFont,
+    fallback: Option<&nr_gfx::PsfFont>,
+) {
+    let mut chunk = String::new();
+    let mut chunk_width = 0;
+    for ch in word.chars() {
+        let char_width = draw::glyph_width(font, fallback, ch);
+        if !chunk.is_empty() && chunk_width + char_width > max_width {
+            out.push(core::mem::take(&mut chunk));
+            chunk_width = 0;
+        }
+        chunk.push(ch);
+        chunk_width += char_width;
     }
-    line.extend(rest);
+    line.push_str(&chunk);
 }
 
 fn fmt_mem(out: &mut String, used: u32, total: u32) {
