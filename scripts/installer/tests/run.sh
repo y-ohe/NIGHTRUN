@@ -40,6 +40,8 @@ source "$LIB/safety.sh"
 source "$LIB/ui.sh"
 # shellcheck source=../lib/models.sh
 source "$LIB/models.sh"
+# shellcheck source=../lib/fonts.sh
+source "$LIB/fonts.sh"
 # shellcheck source=../lib/media.sh
 source "$LIB/media.sh"
 
@@ -80,6 +82,13 @@ t "manifest: malformed line tolerated" bash -c '
     nr_manifest_load "$tmp" 2>/dev/null; rc=$?
     # It must not crash; it must fail cleanly (missing required fields).
     [[ $rc -eq 1 ]]'
+
+# Japanese-font opt-out must remain usable without Python imaging packages.
+NR_ROOT="$(cd -- "$TESTS_DIR/../../.." && pwd)"
+nr_ask() { REPLY=2; }
+t "fonts: skip preserves Spleen-only build" nr_prepare_fonts
+t "fonts: skip sets build disable flag" eq "${NIGHTRUN_DISABLE_JAPANESE_FONT:-}" 1
+unset NIGHTRUN_DISABLE_JAPANESE_FONT
 
 # target filtering
 NR_TARGET="rpi5"
@@ -183,6 +192,27 @@ t "media: stable identity passes" bash -c '
 t "logs: timestamped path shape" bash -c '
     p="build/nightrun-installer-logs/20260707-120000"
     [[ "$p" =~ ^build/nightrun-installer-logs/[0-9]{8}-[0-9]{6}$ ]]'
+
+t "logs: font path creates directory before redirection" bash -c "
+    tmp=\"\$(mktemp -d)\"
+    trap \"rm -rf \\\"\$tmp\\\"\" EXIT
+
+    export NR_ROOT=\"$NR_ROOT\"
+    export NR_LOG_DIR=\"\$tmp/build/nightrun-installer-logs/20260707-120000\"
+
+    source \"$LIB/ui.sh\" >/dev/null 2>&1
+    source \"$LIB/fonts.sh\" >/dev/null 2>&1
+    nr_ask() { REPLY=1; }
+    nr_error() { :; }
+    nr_note() { :; }
+    nr_ok() { :; }
+    nr_section() { :; }
+    nr_item() { :; }
+    nr_offer_pillow() { return 1; }
+    python3() { return 1; }
+    rm -rf -- \"\$NR_LOG_DIR\"
+    nr_prepare_fonts >/dev/null 2>&1 || true
+    [[ -d \"\$NR_LOG_DIR\" ]]"
 
 # ---- live protected-disk resolution (host, read-only) ----
 live_protected="$(NR_PROTECTED_FIXTURE='' nr_protected_disks)"

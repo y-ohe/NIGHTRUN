@@ -14,6 +14,8 @@ readonly NR_LIB="$NR_ROOT/scripts/installer/lib"
 NR_LOG_DIR="$NR_ROOT/build/nightrun-installer-logs/$(date +%Y%m%d-%H%M%S)"
 readonly NR_LOG_DIR
 
+mkdir -p -- "$NR_LOG_DIR"
+
 # shellcheck source=scripts/installer/lib/safety.sh
 source "$NR_LIB/safety.sh"
 # shellcheck source=scripts/installer/lib/ui.sh
@@ -26,6 +28,8 @@ source "$NR_LIB/targets.sh"
 source "$NR_LIB/models.sh"
 # shellcheck source=scripts/installer/lib/downloads.sh
 source "$NR_LIB/downloads.sh"
+# shellcheck source=scripts/installer/lib/fonts.sh
+source "$NR_LIB/fonts.sh"
 # shellcheck source=scripts/installer/lib/build.sh
 source "$NR_LIB/build.sh"
 # shellcheck source=scripts/installer/lib/media.sh
@@ -63,6 +67,8 @@ main() {
     if [[ "$NR_MODEL_ID" != "local" ]]; then
         nr_acquire_model || exit "$EXIT_BUILD"
     fi
+
+    nr_prepare_fonts || exit "$EXIT_BUILD"
 
     # Convert + assemble the target-specific image.
     nr_build_image || exit "$EXIT_BUILD"
